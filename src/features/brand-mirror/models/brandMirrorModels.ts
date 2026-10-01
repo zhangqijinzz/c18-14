@@ -1,5 +1,18 @@
 export type BrandTheme = 'studio' | 'editorial' | 'night'
+// status 只表达「本地保存」状态：error 仅在本地持久化确实失败/被拒绝时出现，
+// 导出失败不得写入这里，否则顶栏会把导出问题误报成数据安全问题。
 export type MirrorStatus = 'loading' | 'ready' | 'editing' | 'error'
+// 导出是独立通道：它的成败不影响本地保存状态。
+export type ExportStatus = 'idle' | 'success' | 'error'
+export type NoticeTone = 'info' | 'success' | 'error'
+
+export interface FeedbackNotice {
+  /** 一句话结论，顶栏/提示条标题 */
+  message: string
+  /** 真实原因与用户可以采取的处理方式 */
+  detail: string
+  tone: NoticeTone
+}
 
 export interface BrandTokens {
   primary: string
@@ -32,7 +45,8 @@ export interface BrandMirrorSnapshot {
   activeVersionId: string | null
   contrastRatio: number
   contrastWarning: boolean
-  message: string
+  notice: FeedbackNotice
+  exportStatus: ExportStatus
 }
 
 export const INITIAL_TOKENS: BrandTokens = {

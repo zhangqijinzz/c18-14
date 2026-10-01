@@ -13,7 +13,11 @@ class MemoryRepository implements BrandRepository {
 
 class MemoryExporter implements BrandGuidelinesExporter {
   received: string | null = null
-  export(snapshot: Parameters<BrandGuidelinesExporter['export']>[0]): void { this.received = buildBrandGuidelinesMarkdown(snapshot) }
+  shouldFail = false
+  export(snapshot: Parameters<BrandGuidelinesExporter['export']>[0]): void {
+    if (this.shouldFail) throw new Error('download blocked')
+    this.received = buildBrandGuidelinesMarkdown(snapshot)
+  }
 }
 
 describe('BrandMirrorViewModel', () => {
@@ -48,6 +52,8 @@ describe('BrandMirrorViewModel', () => {
     viewModel.updateColor('secondary', '#FFFFFF')
     expect(viewModel.getSnapshot().status).toBe('error')
     expect(viewModel.getSnapshot().tokens.secondary).toBe('#FFFFFF')
+    expect(viewModel.getSnapshot().notice.message).toContain('本地保存失败')
+    expect(viewModel.getSnapshot().notice.detail).toContain('编辑仍保留在页面中')
   })
 
   it('recovers a previously persisted document on initialization', () => {
@@ -56,7 +62,7 @@ describe('BrandMirrorViewModel', () => {
     const viewModel = new BrandMirrorViewModel(repository)
     viewModel.initialize()
     expect(viewModel.getSnapshot().theme).toBe('night')
-    expect(viewModel.getSnapshot().message).toContain('恢复')
+    expect(viewModel.getSnapshot().notice.message).toContain('恢复')
   })
 
   it('exports the current token system as brand guidelines', () => {
@@ -67,6 +73,37 @@ describe('BrandMirrorViewModel', () => {
     viewModel.exportBrandGuidelines()
     expect(exporter.received).toContain('# BrandMirror 品牌规范')
     expect(exporter.received).toContain('`primary`')
-    expect(viewModel.getSnapshot().message).toContain('导出')
+    expect(viewModel.getSnapshot().notice.message).toContain('导出')
+    expect(viewModel.getSnapshot().exportStatus).toBe('success')
+  })
+
+  it('keeps local save state intact when export fails', () => {
+    const repository = new MemoryRepository()
+    const exporter = new MemoryExporter()
+    const viewModel = new BrandMirrorViewModel(repository, exporter)
+    viewModel.initialize()
+    const beforeExport = viewModel.getSnapshot().status
+    exporter.shouldFail = true
+    viewModel.exportBrandGuidelines()
+    // 导出失败不得污染保存状态：顶栏仍应显示“已保存”，而不是“本地保存需检查”
+    expect(viewModel.getSnapshot().status).toBe(beforeExport)
+    expect(viewModel.getSnapshot().status).not.toBe('error')
+    expect(viewModel.getSnapshot().exportStatus).toBe('error')
+    expect(viewModel.getSnapshot().notice.message).toContain('导出失败')
+    expect(viewModel.getSnapshot().notice.message).toContain('安全')
+    expect(viewModel.getSnapshot().notice.detail).toContain('重试导出')
+    expect(viewModel.getSnapshot().notice.detail).toContain('无需重新保存')
+  })
+
+  it('recovers save status after a later edit persists successfully', () => {
+    const repository = new MemoryRepository()
+    const viewModel = new BrandMirrorViewModel(repository)
+    viewModel.initialize()
+    repository.shouldFail = true
+    viewModel.updateColor('secondary', '#FFFFFF')
+    expect(viewModel.getSnapshot().status).toBe('error')
+    repository.shouldFail = false
+    viewModel.updateColor('secondary', '#EEEEEE')
+    expect(viewModel.getSnapshot().status).not.toBe('error')
   })
 })

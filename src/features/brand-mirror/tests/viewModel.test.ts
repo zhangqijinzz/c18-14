@@ -13,7 +13,11 @@ class MemoryRepository implements BrandRepository {
 
 class MemoryExporter implements BrandGuidelinesExporter {
   received: string | null = null
-  export(snapshot: Parameters<BrandGuidelinesExporter['export']>[0]): void { this.received = buildBrandGuidelinesMarkdown(snapshot) }
+  shouldFail = false
+  export(snapshot: Parameters<BrandGuidelinesExporter['export']>[0]): void {
+    if (this.shouldFail) throw new Error('download blocked')
+    this.received = buildBrandGuidelinesMarkdown(snapshot)
+  }
 }
 
 describe('BrandMirrorViewModel', () => {
@@ -47,6 +51,8 @@ describe('BrandMirrorViewModel', () => {
     repository.shouldFail = true
     viewModel.updateColor('secondary', '#FFFFFF')
     expect(viewModel.getSnapshot().status).toBe('error')
+    expect(viewModel.getSnapshot().saveStatus).toBe('error')
+    expect(viewModel.getSnapshot().saveMessage).toContain('自动保存失败')
     expect(viewModel.getSnapshot().tokens.secondary).toBe('#FFFFFF')
   })
 
@@ -68,5 +74,40 @@ describe('BrandMirrorViewModel', () => {
     expect(exporter.received).toContain('# BrandMirror 品牌规范')
     expect(exporter.received).toContain('`primary`')
     expect(viewModel.getSnapshot().message).toContain('导出')
+  })
+
+  it('keeps local save state safe when export fails', () => {
+    const repository = new MemoryRepository()
+    const exporter = new MemoryExporter()
+    exporter.shouldFail = true
+    const viewModel = new BrandMirrorViewModel(repository, exporter)
+    viewModel.initialize()
+    viewModel.exportBrandGuidelines()
+
+    const snapshot = viewModel.getSnapshot()
+    expect(snapshot.saveStatus).toBe('ready')
+    expect(snapshot.saveMessage).toContain('已保存')
+    expect(snapshot.exportStatus).toBe('error')
+    expect(snapshot.exportMessage).toContain('导出失败')
+    expect(snapshot.message).toContain('导出失败')
+    expect(snapshot.message).not.toContain('保存失败')
+  })
+
+  it('reports persistence failures separately from export failures', () => {
+    const repository = new MemoryRepository()
+    const exporter = new MemoryExporter()
+    exporter.shouldFail = true
+    const viewModel = new BrandMirrorViewModel(repository, exporter)
+    viewModel.initialize()
+    repository.shouldFail = true
+    viewModel.updateColor('primary', '#123456')
+    viewModel.exportBrandGuidelines()
+
+    const snapshot = viewModel.getSnapshot()
+    expect(snapshot.saveStatus).toBe('error')
+    expect(snapshot.saveMessage).toContain('自动保存失败')
+    expect(snapshot.exportStatus).toBe('error')
+    expect(snapshot.exportMessage).toContain('导出失败')
+    expect(snapshot.exportMessage).toContain('本地保存仍失败')
   })
 })

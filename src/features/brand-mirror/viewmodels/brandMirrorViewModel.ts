@@ -5,6 +5,11 @@ import { INITIAL_TOKENS, type BrandDocument, type BrandMirrorSnapshot, type Bran
 
 type Listener = () => void
 
+const SAVE_FAILED_MESSAGE = '自动保存失败：无法写入本地工作区，可能是浏览器存储受限或空间不足。当前编辑仍保留在本页，但尚未持久化；请不要刷新或关闭页面，稍后继续编辑触发重试，或先复制内容备份。'
+const VERSION_SAVE_FAILED_MESSAGE = '版本保存失败：无法写入本地工作区，可能是浏览器存储受限或空间不足。版本尚未记录，但当前编辑仍保留在本页；请不要刷新或关闭页面，稍后重试或先复制内容备份。'
+const EXPORT_FAILED_MESSAGE = '导出失败：未能生成品牌规范文件，可能是浏览器下载权限受限或导出服务暂时不可用。编辑内容仍保存在本地工作区，请检查下载权限或稍后重新导出。'
+const EXPORT_FAILED_WHILE_SAVE_UNAVAILABLE_MESSAGE = '导出失败：未能生成品牌规范文件，可能是浏览器下载权限受限或导出服务暂时不可用。当前页面中的编辑未受影响，但本地保存仍失败；请先按保存提示备份内容，再重新导出。'
+
 export class BrandMirrorViewModel {
   private snapshot: BrandMirrorSnapshot = this.makeSnapshot({ tokens: INITIAL_TOKENS, theme: 'studio', versions: [] })
   private readonly listeners = new Set<Listener>()
@@ -68,7 +73,7 @@ export class BrandMirrorViewModel {
       createdAt: new Date().toISOString(),
     }
     const versions = [...this.snapshot.versions, nextVersion]
-    this.persist({ tokens: this.snapshot.tokens, theme: this.snapshot.theme, versions }, '版本已保存')
+    this.persist({ tokens: this.snapshot.tokens, theme: this.snapshot.theme, versions }, '版本已保存', VERSION_SAVE_FAILED_MESSAGE)
   }
 
   toggleCompare(): void {
@@ -80,9 +85,22 @@ export class BrandMirrorViewModel {
     if (!this.exporter) return
     try {
       this.exporter.export(this.snapshot)
-      this.snapshot = { ...this.snapshot, message: '品牌规范已导出' }
+      this.snapshot = {
+        ...this.snapshot,
+        message: '品牌规范文件已导出，请在下载位置查看。',
+        exportStatus: 'success',
+        exportMessage: '品牌规范已导出；如未看到文件，请检查浏览器的下载位置或拦截提示。',
+      }
     } catch {
-      this.snapshot = { ...this.snapshot, status: 'error', message: '导出失败，请稍后重试' }
+      const exportMessage = this.snapshot.saveStatus === 'error'
+        ? EXPORT_FAILED_WHILE_SAVE_UNAVAILABLE_MESSAGE
+        : EXPORT_FAILED_MESSAGE
+      this.snapshot = {
+        ...this.snapshot,
+        message: exportMessage,
+        exportStatus: 'error',
+        exportMessage,
+      }
     }
     this.emit()
   }
@@ -96,26 +114,61 @@ export class BrandMirrorViewModel {
   private persistCurrent(): void {
     try {
       this.repository.save({ version: 1, tokens: this.snapshot.tokens, theme: this.snapshot.theme, versions: this.snapshot.versions })
+      this.snapshot = {
+        ...this.snapshot,
+        status: 'ready',
+        saveStatus: 'ready',
+        saveMessage: '所有更改已保存到本地工作区。',
+      }
     } catch {
-      this.snapshot = { ...this.snapshot, status: 'error', message: '本地保存失败，但当前编辑仍保留在页面中' }
+      this.snapshot = {
+        ...this.snapshot,
+        status: 'error',
+        saveStatus: 'error',
+        saveMessage: SAVE_FAILED_MESSAGE,
+        message: SAVE_FAILED_MESSAGE,
+      }
     }
     this.emit()
   }
 
-  private persist(document: Omit<BrandDocument, 'version'>, message: string): void {
+  private persist(document: Omit<BrandDocument, 'version'>, message: string, saveErrorMessage: string): void {
     try {
       this.repository.save({ version: 1, ...document })
       this.snapshot = this.makeSnapshot(document, message, 'ready')
     } catch {
-      this.snapshot = { ...this.snapshot, status: 'error', message: '版本保存失败，请稍后重试' }
+      this.snapshot = {
+        ...this.snapshot,
+        status: 'error',
+        saveStatus: 'error',
+        saveMessage: saveErrorMessage,
+        message: saveErrorMessage,
+      }
     }
     this.emit()
   }
 
-  private makeSnapshot(document: Omit<BrandDocument, 'version'>, message = '', status: BrandMirrorSnapshot['status'] = 'ready'): BrandMirrorSnapshot {
+  private makeSnapshot(document: Omit<BrandDocument, 'version'>, message = '', status: Exclude<BrandMirrorSnapshot['status'], 'loading'> = 'ready'): BrandMirrorSnapshot {
     const ratio = contrastRatio(document.tokens.primary, document.tokens.secondary)
     const latestVersion = document.versions[document.versions.length - 1]
-    return { status, tokens: cloneTokens(document.tokens), theme: document.theme, versions: document.versions, compareMode: false, activeVersionId: latestVersion?.id ?? null, contrastRatio: ratio, contrastWarning: ratio < 3, message }
+    const previous = this.snapshot
+    return {
+      status,
+      saveStatus: status === 'editing' ? 'ready' : status,
+      saveMessage: status === 'error'
+        ? previous?.saveMessage ?? SAVE_FAILED_MESSAGE
+        : '所有更改已保存到本地工作区。',
+      exportStatus: 'idle',
+      exportMessage: '',
+      tokens: cloneTokens(document.tokens),
+      theme: document.theme,
+      versions: document.versions,
+      compareMode: false,
+      activeVersionId: latestVersion?.id ?? null,
+      contrastRatio: ratio,
+      contrastWarning: ratio < 3,
+      message,
+    }
   }
 
   private emit(): void {

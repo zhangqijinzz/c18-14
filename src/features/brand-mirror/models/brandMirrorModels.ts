@@ -1,5 +1,6 @@
 export type BrandTheme = 'studio' | 'editorial' | 'night'
 export type MirrorStatus = 'loading' | 'ready' | 'editing' | 'error'
+export type ExportStatus = 'idle' | 'success' | 'error'
 
 export interface BrandTokens {
   primary: string
@@ -25,6 +26,10 @@ export interface BrandDocument {
 
 export interface BrandMirrorSnapshot {
   status: MirrorStatus
+  saveStatus: Exclude<MirrorStatus, 'loading'>
+  saveMessage: string
+  exportStatus: ExportStatus
+  exportMessage: string
   tokens: BrandTokens
   theme: BrandTheme
   versions: SavedVersion[]
